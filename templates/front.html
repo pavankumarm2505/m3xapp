@@ -1,0 +1,241 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kinova Robot Arm Control</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 50px;
+        }
+        .button {
+            padding: 10px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .video-feed {
+            display: block;
+            margin: 0 auto;
+            width: 640px;
+            height: 480px;
+            border: 1px solid #ccc;
+        }
+        .subtask {
+            padding: 5px;
+            margin: 5px;
+            border: 1px solid #ccc;
+        }
+        .current-subtask {
+            background-color: yellow;
+        }
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1; 
+            padding-top: 100px; 
+            left: 0;
+            top: 0;
+            width: 100%; 
+            height: 100%; 
+            overflow: auto; 
+            background-color: rgb(0,0,0); 
+            background-color: rgba(0,0,0,0.4); 
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Kinova Robot Arm Control</h1>
+    <img src="{{ url_for('video_feed') }}" class="video-feed" alt="Video Feed">
+    <button class="button" onclick="sendCommand('/start')">Start</button>
+    <button class="button" onclick="sendCommand('/stop')">Stop</button>
+    <button class="button" onclick="sendCommand('/reset')">Reset</button>
+    <button class="button" onclick="sendCommand('/pause')">Pause</button>
+    <button class="button" onclick="sendCommand('/make_cereal_bowl')">Make a Cereal Bowl</button>
+    <button class="button" onclick="sendCommand('/next_subtask')">Next Subtask</button>
+    <button class="button" onclick="openConfirmationModal()">Previous Subtask</button>
+    <button class="button" onclick="startSpeechRecognition()">Speak</button>
+    <h2>Subtasks</h2>
+    <div id="subtasks-container">
+        {% for subtask in subtasks %}
+            <div class="subtask {% if loop.index0 == current_subtask_index %}current-subtask{% endif %}">
+                {{ subtask }}
+            </div>
+        {% endfor %}
+    </div>
+
+    <h2>Speech Transcript</h2>
+    <div id="transcript-container"></div>
+    <button id="confirm-transcript-button" class="button" style="display:none;" onclick="openTranscriptModal()">Confirm Transcript</button>
+    <!--- this is for the pop up for previous subtask button -->
+    <div id="confirmationModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeConfirmationModal()">&times;</span>
+            <p>Are you sure you want to move to the previous subtask?</p>
+            <button class="button" onclick="confirmPreviousSubtask(true)">Yes</button>
+            <button class="button" onclick="confirmPreviousSubtask(false)">No</button>
+        </div>
+    </div>
+    <!--- this is for the pop up for transcript -->
+    <div id="transcriptModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeTranscriptModal()">&times;</span>
+            <p>Do you want to send this transcript to the robotic arm?</p>
+            <button class="button" onclick="confirmTranscript(true)">Yes</button>
+            <button class="button" onclick="confirmTranscript(false)">No</button>
+        </div>
+    </div>
+
+    <script>
+        function sendCommand(url) {
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Command executed successfully');
+                    updateSubtasks();
+                } else {
+                    console.error('Failed to execute command');
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+        function updateSubtasks() {
+            fetch('/get_subtasks', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const subtasksContainer = document.getElementById('subtasks-container');
+                subtasksContainer.innerHTML = '';
+                data.subtasks.forEach((subtask, index) => {
+                    const subtaskDiv = document.createElement('div');
+                    subtaskDiv.classList.add('subtask');
+                    if (index === data.current_subtask_index) {
+                        subtaskDiv.classList.add('current-subtask');
+                    }
+                    subtaskDiv.textContent = subtask;
+                    subtasksContainer.appendChild(subtaskDiv);
+                });
+            })
+            .catch(error => console.error('Error:', error));
+        }
+        function openConfirmationModal() {
+            document.getElementById('confirmationModal').style.display = "block";
+        }
+
+        function closeConfirmationModal() {
+            document.getElementById('confirmationModal').style.display = "none";
+        }
+
+        function confirmPreviousSubtask(confirm) {
+            if (confirm) {
+                sendCommand('/previous_subtask');
+            }
+            closeConfirmationModal();
+        }
+
+        function openTranscriptModal() {
+            document.getElementById('transcriptModal').style.display = "block";
+        }
+
+        function closeTranscriptModal() {
+            document.getElementById('transcriptModal').style.display = "none";
+        }
+
+        function confirmTranscript(confirm) {
+            if (confirm) {
+                const transcript = document.getElementById('transcript-container').textContent;
+                sendTranscriptToServer(transcript);
+            }
+            closeTranscriptModal();
+        }
+
+        // Close the modal if the user clicks outside of it
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('confirmationModal')) {
+                closeConfirmationModal();
+            }
+            if (event.target == document.getElementById('transcriptModal')) {
+                closeTranscriptModal();
+            }
+        }
+
+        function startSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+
+            recognition.onstart = function() {
+                console.log('Voice recognition started. Speak into the microphone.');
+            };
+
+            recognition.onspeechend = function() {
+                recognition.stop();
+            };
+
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                console.log('Transcript:', transcript);
+                document.getElementById('transcript-container').textContent = transcript;
+                document.getElementById('confirm-transcript-button').style.display = 'inline-block';
+                // // Send the transcript to the server or process it as needed
+                // sendTranscriptToServer(transcript);
+            };
+
+            recognition.start();
+        }
+
+        function sendTranscriptToServer(transcript) {
+            fetch('/process_speech', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ transcript: transcript })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Speech processed successfully:', data.message);
+                } else {
+                    console.error('Failed to process speech');
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+</html>
